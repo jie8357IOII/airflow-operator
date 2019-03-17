@@ -39,13 +39,11 @@ spec:
         {{end}}
       containers:
       - name: postgres
-        args:
-        - --explicit-defaults-for-timestamp=ON
         env:
         - name: POSTGRES_DB
           value: testdb
         - name: POSTGRES_USER
-          value: airflow
+          value: postgres
         - name: POSTGRES_PASSWORD
           valueFrom:
             secretKeyRef:

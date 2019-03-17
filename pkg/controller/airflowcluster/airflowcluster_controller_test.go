@@ -31,7 +31,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	kbc "sigs.k8s.io/kubesdk/pkg/kbcontroller"
 )
 
 var c client.Client
@@ -64,10 +63,10 @@ func TestReconcile(t *testing.T) {
 		Spec: airflowv1alpha1.AirflowClusterSpec{
 			Executor:  "Celery",
 			Redis:     &airflowv1alpha1.RedisSpec{Operator: false},
-			Scheduler: &airflowv1alpha1.SchedulerSpec{Version: "1.10.1"},
-			UI:        &airflowv1alpha1.AirflowUISpec{Replicas: 1, Version: "1.10.1"},
-			Worker:    &airflowv1alpha1.WorkerSpec{Replicas: 2, Version: "1.10.1"},
-			Flower:    &airflowv1alpha1.FlowerSpec{Replicas: 1, Version: "1.10.1"},
+			Scheduler: &airflowv1alpha1.SchedulerSpec{Version: "1.10.2"},
+			UI:        &airflowv1alpha1.AirflowUISpec{Replicas: 1, Version: "1.10.2"},
+			Worker:    &airflowv1alpha1.WorkerSpec{Replicas: 2, Version: "1.10.2"},
+			Flower:    &airflowv1alpha1.FlowerSpec{Replicas: 1, Version: "1.10.2"},
 			DAGs: &airflowv1alpha1.DagSpec{
 				DagSubdir: "airflow/example_dags/",
 				Git: &airflowv1alpha1.GitSpec{
@@ -85,8 +84,9 @@ func TestReconcile(t *testing.T) {
 	g.Expect(err).NotTo(gomega.HaveOccurred())
 	c = mgr.GetClient()
 
-	recFn, requests := SetupTestReconcile(newReconciler(mgr))
-	g.Expect(kbc.CreateController("airflowcluster", mgr, &airflowv1alpha1.AirflowCluster{}, recFn)).NotTo(gomega.HaveOccurred())
+	r := newReconciler(mgr)
+	recFn, requests := SetupTestReconcile(r)
+	g.Expect(r.Controller(recFn)).NotTo(gomega.HaveOccurred())
 
 	stopMgr, mgrStopped := StartTestManager(mgr, g)
 

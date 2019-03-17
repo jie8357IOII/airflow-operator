@@ -21,20 +21,19 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation/field"
-	"sigs.k8s.io/kubesdk/pkg/component"
-	cr "sigs.k8s.io/kubesdk/pkg/customresource"
-	"sigs.k8s.io/kubesdk/pkg/status"
+	"sigs.k8s.io/controller-reconciler/pkg/finalizer"
+	"sigs.k8s.io/controller-reconciler/pkg/status"
 )
 
 // defaults and constant strings
 const (
-	defaultMySQLImage      = "mysql"
-	defaultMySQLVersion    = "5.7"
-	defaultPostgresImage   = "postgres"
-	defaultPostgresVersion = "9.5"
+	DefaultMySQLImage      = "mysql"
+	DefaultMySQLVersion    = "5.7"
+	DefaultPostgresImage   = "postgres"
+	DefaultPostgresVersion = "9.5"
 	defaultUIImage         = "gcr.io/airflow-operator/airflow"
-	defaultUIVersion       = "1.10.1"
-	defaultFlowerVersion   = "1.10.1"
+	defaultUIVersion       = "1.10.2"
+	defaultFlowerVersion   = "1.10.2"
 	defaultNFSVersion      = "0.8"
 	defaultNFSImage        = "k8s.gcr.io/volume-nfs"
 	defaultSQLProxyImage   = "gcr.io/cloud-airflow-public/airflow-sqlproxy"
@@ -71,7 +70,8 @@ type AirflowBase struct {
 
 // AirflowBaseStatus defines the observed state of AirflowBase
 type AirflowBaseStatus struct {
-	status.Meta `json:",inline"`
+	status.Meta          `json:",inline"`
+	status.ComponentMeta `json:",inline"`
 }
 
 // AirflowBaseSpec defines the desired state of AirflowBase
@@ -344,6 +344,8 @@ type SQLProxySpec struct {
 	Region string `json:"region"`
 	// Instance defines the SQL instance name
 	Instance string `json:"instance"`
+	// Type defines the SQL instance type
+	Type string `json:"type"`
 	// Resources is the resource requests and limits for the pods.
 	// +optional
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
@@ -419,10 +421,10 @@ func (b *AirflowBase) ApplyDefaults() {
 			b.Spec.MySQL.Replicas = defaultDBReplicas
 		}
 		if b.Spec.MySQL.Image == "" {
-			b.Spec.MySQL.Image = defaultMySQLImage
+			b.Spec.MySQL.Image = DefaultMySQLImage
 		}
 		if b.Spec.MySQL.Version == "" {
-			b.Spec.MySQL.Version = defaultMySQLVersion
+			b.Spec.MySQL.Version = DefaultMySQLVersion
 		}
 		if b.Spec.MySQL.Backup != nil {
 			if b.Spec.MySQL.Backup.Storage.StorageProvider == "" {
@@ -441,10 +443,10 @@ func (b *AirflowBase) ApplyDefaults() {
 			b.Spec.Postgres.Replicas = defaultDBReplicas
 		}
 		if b.Spec.Postgres.Image == "" {
-			b.Spec.Postgres.Image = defaultPostgresImage
+			b.Spec.Postgres.Image = DefaultPostgresImage
 		}
 		if b.Spec.Postgres.Version == "" {
-			b.Spec.Postgres.Version = defaultPostgresVersion
+			b.Spec.Postgres.Version = DefaultPostgresVersion
 		}
 	}
 	if b.Spec.Storage != nil {
@@ -463,21 +465,17 @@ func (b *AirflowBase) ApplyDefaults() {
 			b.Spec.SQLProxy.Version = defaultSQLProxyVersion
 		}
 	}
+	b.Status.ComponentList = status.ComponentList{}
+	finalizer.EnsureStandard(b)
 }
 
-// UpdateRsrcStatus records status or error in status
-func (b *AirflowBase) UpdateRsrcStatus(status interface{}, err error) bool {
-	esstatus := status.(*AirflowBaseStatus)
-	if status != nil {
-		b.Status = *esstatus
-	}
-
+// HandleError records status or error in status
+func (b *AirflowBase) HandleError(err error) {
 	if err != nil {
 		b.Status.SetError("ErrorSeen", err.Error())
 	} else {
 		b.Status.ClearError()
 	}
-	return true
 }
 
 // Validate the AirflowBase
@@ -511,76 +509,13 @@ func (b *AirflowBase) Validate() error {
 	return errs.ToAggregate()
 }
 
-// Components returns components for this resource
-func (b *AirflowBase) Components() []component.Component {
-	c := []component.Component{}
-	if b.Spec.MySQL != nil {
-		c = append(c, component.Component{
-			Handle:   b.Spec.MySQL,
-			Name:     ValueAirflowComponentMySQL,
-			CR:       b,
-			OwnerRef: b.OwnerRef(),
-		})
-	}
-	if b.Spec.Postgres != nil {
-		c = append(c, component.Component{
-			Handle:   b.Spec.Postgres,
-			Name:     ValueAirflowComponentPostgres,
-			CR:       b,
-			OwnerRef: b.OwnerRef(),
-		})
-	}
-	if b.Spec.Storage != nil {
-		c = append(c, component.Component{
-			Handle:   b.Spec.Storage,
-			Name:     ValueAirflowComponentNFS,
-			CR:       b,
-			OwnerRef: b.OwnerRef(),
-		})
-	}
-	if b.Spec.SQLProxy != nil {
-		c = append(c, component.Component{
-			Handle:   b.Spec.SQLProxy,
-			Name:     ValueAirflowComponentSQLProxy,
-			CR:       b,
-			OwnerRef: b.OwnerRef(),
-		})
-	}
-	c = append(c, component.Component{
-		Handle:   b,
-		Name:     ValueAirflowComponentBase,
-		CR:       b,
-		OwnerRef: b.OwnerRef(),
-	})
-	return c
-}
-
 // OwnerRef returns owner ref object with the component's resource as owner
-func (b *AirflowBase) OwnerRef() []metav1.OwnerReference {
-	return []metav1.OwnerReference{
-		*metav1.NewControllerRef(b, schema.GroupVersionKind{
-			Group:   SchemeGroupVersion.Group,
-			Version: SchemeGroupVersion.Version,
-			Kind:    "AirflowBase",
-		}),
-	}
-}
-
-// NewRsrc - return a new resource object
-func (b *AirflowBase) NewRsrc() cr.Handle {
-	return &AirflowBase{}
-}
-
-// NewStatus - return a  resource status object
-func (b *AirflowBase) NewStatus() interface{} {
-	s := b.Status.DeepCopy()
-	s.ComponentList = status.ComponentList{}
-	return s
-}
-
-// StatusDiffers returns True if there is a change in status
-func (b *AirflowBase) StatusDiffers(new AirflowBaseStatus) bool {
-	return true
+func (b *AirflowBase) OwnerRef() *metav1.OwnerReference {
+	return metav1.NewControllerRef(b, schema.GroupVersionKind{
+		Group:   SchemeGroupVersion.Group,
+		Version: SchemeGroupVersion.Version,
+		Kind:    "AirflowBase",
+	})
 }
 
 // NewAirflowBase return a defaults filled AirflowBase object
